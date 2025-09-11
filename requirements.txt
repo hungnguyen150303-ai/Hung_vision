@@ -1,0 +1,19 @@
+# Jetson (Python 3.10)
+numpy==1.26.4
+
+# Phụ trợ
+PyYAML>=6.0
+requests>=2.31
+tqdm>=4.66
+psutil>=5.9
+
+# FastAPI
+fastapi>=0.111
+uvicorn[standard]>=0.30
+pydantic-settings>=2.3
+paho-mqtt>=1.6
+
+protobuf<4
+absl-py>=1.4
+attrs>=23
+# (Không cài opencv-python / pyrealsense2 / torch từ pip)
