@@ -19,6 +19,10 @@ from app.usecases.followme_usecases import (
     start_followme_uc, stop_followme_uc, status_followme_uc
 )
 
+from app.usecases.tag_usecases import (
+    start_tag_uc, stop_tag_uc, status_tag_uc
+)
+
 log = logging.getLogger("vision.lifecycle")
 
 
@@ -193,6 +197,17 @@ def register_lifecycle(app: FastAPI):
                     return stop_unphysics_uc(container.unphysics)
                 elif t == "set":
                     return status_unphysics_uc(container.unphysics)
+            
+            elif m == "tagdata":
+                if mtype == "start":
+                    return _preempt_then_start(
+                        lambda: start_tag_uc(container.tag, settings=settings, overrides=o),
+                        "tagdata"
+                    )
+                elif t == "stop":
+                    return stop_tag_uc(container.tag)
+                elif t == "status":
+                    return status_tag_uc(container.tag)
 
             elif m == "follow_me":
                 if t == "start":

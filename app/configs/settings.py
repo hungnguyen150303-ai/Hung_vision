@@ -10,6 +10,25 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    TAG_RGB_DEVICE: int | str = 0          # hoặc "/dev/video0"
+    TAG_RGB_WIDTH: int = 640
+    TAG_RGB_HEIGHT: int = 480
+    TAG_RGB_FPS: int = 30
+
+    TAG_CALIB_FILE: str = "/app/models/camera_calib2.npz"  # chứa K, dist, img_size
+    TAG_SIZE_M: float = 0.135
+    TAG_FAMILY: str = "tag36h11"
+
+    TAG_NTHREADS: int = 2
+    TAG_QUAD_DECIMATE: float = 1.0
+    TAG_QUAD_SIGMA: float = 0.0
+    TAG_REFINE_EDGES: int = 1
+    TAG_DECODE_SHARPENING: float = 0.25
+
+    TAG_ALPHA_POS: float = 0.25
+    TAG_ALPHA_DIST: float = 0.25
+    TAG_ALPHA_ANGLE: float = 0.25
+
     # ---------- MQTT ----------
     MQTT_HOST: str = "127.0.0.1"
     MQTT_PORT: int = 1883
