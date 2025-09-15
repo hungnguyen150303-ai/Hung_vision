@@ -6,7 +6,7 @@ IMAGE_NAME="vision:jetson"
 
 # ===== Host paths (sửa theo ý bạn) =====
 BASE_DIR="/home/vetcbot/ServiceRobot/Vision"
-LOG_DIR="$BASE_DIR/logs"
+LOG_DIR="/home/vetcbot/ServiceRobot/logs/VISION"
 DATA_DIR="$BASE_DIR/data"               # nếu muốn lưu data
 MODELS_DIR="$BASE_DIR/models"           # nếu code có models
 

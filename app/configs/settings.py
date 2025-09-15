@@ -36,8 +36,8 @@ class Settings(BaseSettings):
     MQTT_USERNAME: Optional[str] = None
     MQTT_PASSWORD: Optional[str] = None
     MQTT_CLIENT_ID: str = "vision-svc"
-    MQTT_METHOD_TOPIC: str = "vision/method"
-    MQTT_RESULT_TOPIC: str = "vision/result"
+    MQTT_METHOD_TOPIC: str = "vetc/robot/vision/method"
+    MQTT_RESULT_TOPIC: str = "vetc/robot/vision/result"
 
     # ---------- RGB Camera (2D) - defaults dùng chung (counter sẽ dùng cái này) ----------
     RGB_CAM_DEVICE: Union[int, str] = 0
