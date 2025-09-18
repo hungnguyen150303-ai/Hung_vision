@@ -27,6 +27,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-numpy python3-scipy python3-sklearn python3-sklearn-lib \
     python3-sympy python3-networkx python3-matplotlib python3-imageio \
     python3-pandas \
+    librealsense2 librealsense2-utils librealsense2-gl python3-realsense2 \
  && apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # ==== Cài Python deps ====
