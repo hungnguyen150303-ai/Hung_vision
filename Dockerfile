@@ -5,6 +5,7 @@ FROM dustynv/l4t-pytorch:r36.4.0
 ARG MAKE_JOBS=1
 ARG WITH_FOLLOWME_EXTRAS=0   # 0 = không cài insightface khi build
 
+# ép pip ưu tiên binary để né build từ source
 ENV MAKEFLAGS="-j${MAKE_JOBS}" \
     CMAKE_BUILD_PARALLEL_LEVEL=${MAKE_JOBS} \
     DEBIAN_FRONTEND=noninteractive \
@@ -16,6 +17,7 @@ ENV MAKEFLAGS="-j${MAKE_JOBS}" \
     GLOG_minloglevel=2 \
     TF_CPP_MIN_LOG_LEVEL=2 \
     PIP_PREFER_BINARY=1
+
 
 # 1) Gói hệ thống cần thiết (gộp lại 1 RUN để tiết kiệm layer & RAM)
 RUN apt-get update && apt-get install -y --no-install-recommends \
