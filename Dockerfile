@@ -1,80 +1,71 @@
-ARG MAKE_JOBS=1
-ARG WITH_FOLLOWME_EXTRAS=0
-
 FROM dustynv/l4t-pytorch:r36.4.0
 
-ENV MAKEFLAGS="-j${MAKE_JOBS}" \
-    CMAKE_BUILD_PARALLEL_LEVEL=${MAKE_JOBS} \
-    DEBIAN_FRONTEND=noninteractive \
+ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     QT_QPA_PLATFORM=offscreen \
     PIP_INDEX_URL=https://pypi.org/simple \
     PIP_DEFAULT_TIMEOUT=180 \
-    GLOG_minloglevel=2 \
-    TF_CPP_MIN_LOG_LEVEL=2 \
-    PIP_PREFER_BINARY=1
+    RS_VER=v2.56.5\
+    MPLBACKEND=Agg
 
-# ==== Thêm kho APT RealSense (cách mới, tránh apt-key bị deprecated) ====
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    wget ca-certificates gnupg && \
-    wget -O /usr/share/keyrings/librealsense-archive-keyring.gpg https://github.com/IntelRealSense/librealsense/raw/master/keys/IntelRealSenseLFS.key && \
-    echo "deb [signed-by=/usr/share/keyrings/librealsense-archive-keyring.gpg] https://librealsense.intel.com/Debian/apt-repo jammy main" \
-        > /etc/apt/sources.list.d/librealsense.list
-
-
-# ==== Cài các gói hệ thống (gộp 1 RUN để tiết kiệm RAM/layer) ====
+# 1) Gói hệ thống (OpenCV hệ thống + toolchain build librealsense)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential cmake git pkg-config \
     libssl-dev libusb-1.0-0-dev libudev-dev \
     libgtk-3-dev libglfw3-dev libgl1-mesa-dev libglu1-mesa-dev \
-    libeigen3-dev udev v4l-utils ffmpeg \
-    python3-opencv python3-pip \
-    python3-numpy python3-scipy python3-sklearn python3-sklearn-lib \
-    python3-sympy python3-networkx python3-matplotlib python3-imageio \
-    python3-pandas \
-    librealsense2 librealsense2-utils librealsense2-gl python3-realsense2 \
- && apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+    udev v4l-utils ffmpeg curl ca-certificates \
+    python3-opencv python3-matplotlib \
+ && rm -rf /var/lib/apt/lists/*
 
-# ==== Cài thư viện Python ====
+WORKDIR /tmp
+
+# 2) Build librealsense từ source (CUDA + Python bindings)
+RUN git clone --depth=1 --branch ${RS_VER} https://github.com/IntelRealSense/librealsense.git \
+ && cd librealsense && mkdir build && cd build \
+ && cmake .. \
+      -DBUILD_EXAMPLES=OFF \
+      -DBUILD_GRAPHICAL_EXAMPLES=OFF \
+      -DBUILD_WITH_CUDA=ON \
+      -DBUILD_PYTHON_BINDINGS=ON \
+      -DFORCE_RSUSB_BACKEND=ON \
+      -DPYTHON_EXECUTABLE=/usr/bin/python3 \
+ && make -j"$(nproc)" \
+ && make install \
+ && cp ../config/99-realsense-libusb.rules /etc/udev/rules.d/ \
+ && udevadm control --reload-rules || true \
+ && ldconfig \
+ && cd /tmp && rm -rf librealsense
+
+# 3) Xóa pip.conf tùy biến (nếu có), đảm bảo dùng PyPI
+RUN rm -f /etc/pip.conf /root/.config/pip/pip.conf /root/.pip/pip.conf || true
+
 WORKDIR /app
+
+# 4) Cài requirements (KHÔNG kéo opencv-python/pyrealsense2 từ pip)
 COPY requirements.txt /app/requirements.txt
-
 RUN python3 -m pip install --no-cache-dir --upgrade pip setuptools wheel \
- && python3 -m pip install --no-cache-dir -r /app/requirements.txt --no-deps \
- && python3 -m pip install --no-cache-dir "ultralytics>=8.2.0,<9" --no-deps \
- && python3 -m pip install --no-cache-dir fastapi "uvicorn[standard]" paho-mqtt
+ && python3 -m pip install --no-cache-dir -r /app/requirements.txt \
+ && python3 -m pip install --no-cache-dir "ultralytics>=8.2.0,<9" --no-deps\
+ && python3 -m pip install --no-cache-dir "mediapipe==0.10.14" --no-deps
 
-# ==== Mediapipe (dùng trong gesture/unphysics) ====
-RUN python3 -m pip install --no-cache-dir mediapipe>=0.10.0
 
-# ==== InsightFace (chỉ khi build WITH_FOLLOWME_EXTRAS=1) ====
-RUN if [ "x${WITH_FOLLOWME_EXTRAS}" = "x1" ]; then \
-      python3 -m pip install --no-cache-dir onnxruntime-gpu==1.16.3 || python3 -m pip install --no-cache-dir onnxruntime==1.16.3; \
-      python3 -m pip install --no-cache-dir insightface==0.7.3; \
-    fi
+# 5) Kiểm tra cv2 / torch / pyrealsense2
+RUN python3 - <<'PY'
+import torch, cv2
+print("torch:", torch.__version__, "cuda:", torch.version.cuda, "gpu:", torch.cuda.is_available())
+print("cv2:", cv2.__version__)
+try:
+    import pyrealsense2 as rs
+    print("pyrealsense2: OK")
+except Exception as e:
+    print("pyrealsense2 import error:", e)
+PY
 
-# ==== Copy mã nguồn ====
+# 6) Copy code & cấu hình service
 COPY . .
 RUN mkdir -p /app/logs
 
 EXPOSE 9000
-
-# ==== Sanity check ====
-RUN python3 - <<'PY'
-import cv2
-print("[CHECK] OpenCV:", cv2.__version__)
-try:
-    import pyrealsense2 as rs
-    print("[CHECK] pyrealsense2: OK")
-except Exception as e:
-    print("[WARN] pyrealsense2 import error:", e)
-try:
-    import mediapipe as mp
-    print("[CHECK] mediapipe: OK")
-except Exception as e:
-    print("[WARN] mediapipe import error:", e)
-PY
-
-# ==== CMD chạy server ====
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "9000", "--log-level", "info"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "9000", "--proxy-headers"]
+#CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "9001"]

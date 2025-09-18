@@ -4,18 +4,18 @@ set -e
 APP_NAME="vision-service"
 IMAGE_NAME="vision:jetson"
 
-# ===== Host paths =====
+# ===== Host paths (sửa theo ý bạn) =====
 BASE_DIR="/home/vetcbot/ServiceRobot/Vision"
 LOG_DIR="$BASE_DIR/logs"
-DATA_DIR="$BASE_DIR/data"
-MODELS_DIR="$BASE_DIR/models"
+DATA_DIR="$BASE_DIR/data"               # nếu muốn lưu data
+MODELS_DIR="$BASE_DIR/models"           # nếu code có models
 
 # ===== Container paths =====
 LOG_CONT_DIR="/app/logs"
 DATA_CONT_DIR="/app/data"
 MODELS_CONT_DIR="/app/models"
 
-# ===== Port (default 9000) =====
+# ===== Port (default 9000 hoặc từ config.json) =====
 PORT=$(python3 - <<'PY'
 import json, os
 port = 9000
@@ -29,17 +29,10 @@ print(port)
 PY
 )
 
-# build args (siêu tiết kiệm RAM)
-BUILD_JOBS="${BUILD_JOBS:-1}"
-WITH_FOLLOWME_EXTRAS="${WITH_FOLLOWME_EXTRAS:-0}"  # 0 = không cài insightface khi build
+echo "📦 Building image $IMAGE_NAME ..."
+docker build -t "$IMAGE_NAME" .
 
-echo "📦 Building $IMAGE_NAME (jobs=$BUILD_JOBS, followme_extras=$WITH_FOLLOWME_EXTRAS) ..."
-# TẮT BuildKit để giảm RAM nền
-DOCKER_BUILDKIT=0 docker build \
-  --build-arg MAKE_JOBS="$BUILD_JOBS" \
-  --build-arg WITH_FOLLOWME_EXTRAS="$WITH_FOLLOWME_EXTRAS" \
-  -t "$IMAGE_NAME" .
-
+# Tạo thư mục host nếu thiếu
 mkdir -p "$LOG_DIR" "$DATA_DIR" "$MODELS_DIR"
 
 echo "🛑 Stopping old container (if exists) ..."
@@ -53,8 +46,6 @@ docker run -d \
   --ipc=host \
   --privileged \
   -e QT_QPA_PLATFORM=offscreen \
-  -e GLOG_minloglevel=2 \
-  -e TF_CPP_MIN_LOG_LEVEL=2 \
   -v /dev:/dev \
   -v /run/udev:/run/udev:ro \
   -v "$LOG_DIR":"$LOG_CONT_DIR" \
@@ -63,4 +54,6 @@ docker run -d \
   "$IMAGE_NAME"
 
 echo "✅ Up. Logs:  docker logs -f $APP_NAME"
-echo "🌐 Test:     curl http://127.0.0.1:$PORT/healthz"
+echo "🌐 Test:     curl http://127.0.0.1:$PORT/docs"
+echo "📁 Logs:     $LOG_DIR"
+echo "📁 Data:     $DATA_DIR"
