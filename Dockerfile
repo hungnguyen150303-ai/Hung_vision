@@ -17,11 +17,11 @@ ENV MAKEFLAGS="-j${MAKE_JOBS}" \
 
 # ==== Thêm kho APT RealSense (cách mới, tránh apt-key bị deprecated) ====
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl ca-certificates gnupg && \
-    curl -fsSL https://librealsense.intel.com/Debian/IntelRealSenseLFS.key \
-        -o /usr/share/keyrings/librealsense-archive-keyring.gpg && \
+    wget ca-certificates gnupg && \
+    wget -O /usr/share/keyrings/librealsense-archive-keyring.gpg https://github.com/IntelRealSense/librealsense/raw/master/keys/IntelRealSenseLFS.key && \
     echo "deb [signed-by=/usr/share/keyrings/librealsense-archive-keyring.gpg] https://librealsense.intel.com/Debian/apt-repo jammy main" \
         > /etc/apt/sources.list.d/librealsense.list
+
 
 # ==== Cài các gói hệ thống (gộp 1 RUN để tiết kiệm RAM/layer) ====
 RUN apt-get update && apt-get install -y --no-install-recommends \
