@@ -4,95 +4,93 @@ set -euo pipefail
 APP_NAME="vision-service"
 IMAGE_NAME="vision:jetson"
 
-# ===== Host paths =====
+# ===== Paths (sửa nếu cần) =====
 BASE_DIR="/home/vetcbot/ServiceRobot/Vision"
 LOG_DIR="/home/vetcbot/ServiceRobot/logs/VISION"
 DATA_DIR="$BASE_DIR/data"
 MODELS_DIR="$BASE_DIR/models"
 
-# ===== Container paths =====
+# ===== Container mount points =====
 LOG_CONT_DIR="/app/logs"
 DATA_CONT_DIR="/app/data"
 MODELS_CONT_DIR="/app/models"
 
-# ===== Base image để build (có thể override khi chạy) =====
-# Ví dụ: BASE_IMAGE="nvcr.io/nvidia/l4t-ml:r36.4.0-py3" ./run_vision.sh
-BASE_IMAGE="${BASE_IMAGE:-dustynv/l4t-pytorch:r36.4.0}"
+# ===== Base image & phiên bản librealsense (override qua env nếu muốn) =====
+: "${BASE_IMAGE:=nvcr.io/nvidia/l4t-ml:r36.4.0-py3}"   # hoặc: dustynv/l4t-pytorch:r36.4.0
+: "${RS_VER:=v2.56.5}"
 
-# ===== Helper: retry pull với backoff =====
-docker_pull_retry() {
-  local img="$1" max=4 delay=3
-  for i in $(seq 1 "$max"); do
-    echo "➡️  [${i}/${max}] pulling $img ..."
-    if docker pull "$img"; then
-      echo "✅ Pulled $img"
-      return 0
-    fi
-    echo "⚠️  Pull failed, retry in ${delay}s..."
-    sleep "$delay"
-    delay=$((delay * 2))
-  done
-  echo "❌ Could not pull $img after $max attempts."
-  return 1
-}
-
-# ===== Chuẩn bị =====
-echo "📂 cd $BASE_DIR"
+# ===== Lấy PORT từ config.json trong BASE_DIR (mặc định 9000) =====
 cd "$BASE_DIR"
-
-# Sync clock (tránh lỗi TLS do lệch giờ, thường gặp trên Jetson)
-if command -v timedatectl >/dev/null 2>&1; then
-  sudo timedatectl set-ntp true || true
-fi
-
-# Lấy PORT từ config.json trong BASE_DIR (mặc định 9000)
 PORT=$(python3 - <<'PY'
 import json, os
-port = 9000
+port=9000
+cfg="config.json"
 try:
-    cfg = os.path.join(os.getcwd(), "config.json")
     if os.path.exists(cfg):
-        with open(cfg, "r", encoding="utf-8") as f:
-            port = int(json.load(f).get("PORT", 9000))
-except Exception:
-    pass
+        with open(cfg,"r",encoding="utf-8") as f:
+            port=int(json.load(f).get("PORT",9000))
+except: pass
 print(port)
 PY
 )
 
-# Tạo thư mục host nếu thiếu
-mkdir -p "$LOG_DIR" "$DATA_DIR" "$MODELS_DIR"
+# ===== Chuẩn bị thư mục và cache local =====
+mkdir -p "$LOG_DIR" "$DATA_DIR" "$MODELS_DIR" .docker-cache
 
-# ===== Bảo đảm base image sẵn sàng (tự pull nếu chưa có) =====
-if ! docker image inspect "$BASE_IMAGE" >/dev/null 2>&1; then
-  echo "🧩 Base image not found locally: $BASE_IMAGE"
-  docker_pull_retry "$BASE_IMAGE"
+# ===== Đồng bộ clock (tránh lỗi TLS) =====
+if command -v timedatectl >/dev/null 2>&1; then
+  sudo timedatectl set-ntp true || true
 fi
 
-# ===== Build app image (truyền BASE_IMAGE vào Dockerfile) =====
-echo "📦 Building image $IMAGE_NAME (BASE_IMAGE=$BASE_IMAGE) ..."
-# --pull=true để refresh metadata base (nếu mạng ổn)
-DOCKER_BUILDKIT=1 docker build \
-  --pull \
+# ===== Pre-pull base image để đỡ “load metadata” timeout =====
+echo "⤵️  Pre-pull base image: $BASE_IMAGE"
+docker pull "$BASE_IMAGE" || true
+
+# ===== Build image với BuildKit + cache local =====
+echo "📦 Building $IMAGE_NAME (BASE_IMAGE=$BASE_IMAGE, RS_VER=$RS_VER, PORT=$PORT) ..."
+DOCKER_BUILDKIT=1 docker buildx build \
   --build-arg BASE_IMAGE="$BASE_IMAGE" \
-  -t "$IMAGE_NAME" .
+  --build-arg RS_VER="$RS_VER" \
+  --build-arg PORT="$PORT" \
+  --cache-from type=local,src=.docker-cache \
+  --cache-to   type=local,dest=.docker-cache,mode=max \
+  -t "$IMAGE_NAME" \
+  "$BASE_DIR"
 
 # ===== Restart container =====
-echo "🛑 Stopping old container (if exists) ..."
+echo "🛑 Removing old container (if exists) ..."
 docker rm -f "$APP_NAME" 2>/dev/null || true
 
-echo "🚀 Running new container on port $PORT (host network) ..."
+echo "🚀 Running container on port $PORT with ~4GB RAM limit ..."
 docker run -d \
   --name "$APP_NAME" \
   --runtime nvidia \
   --network host \
-  --ipc=host \
   --privileged \
   --restart unless-stopped \
+  \
+  # ==== Giới hạn bộ nhớ ====
+  --memory=4g \
+  --memory-swap=4g \
+  --shm-size=512m \
+  \
+  # ==== Env: giảm thread & RAM ====
   -e QT_QPA_PLATFORM=offscreen \
   -e PORT="$PORT" \
+  -e OMP_NUM_THREADS=1 \
+  -e OPENBLAS_NUM_THREADS=1 \
+  -e MKL_NUM_THREADS=1 \
+  -e NUMEXPR_NUM_THREADS=1 \
+  -e NUMBA_NUM_THREADS=1 \
+  -e MALLOC_ARENA_MAX=2 \
+  -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:False,max_split_size_mb:64 \
+  -e ORT_NUM_THREADS=1 \
+  \
+  # ==== Thiết bị & udev ====
   -v /dev:/dev \
   -v /run/udev:/run/udev:ro \
+  \
+  # ==== Mount logs/data/models ====
   -v "$LOG_DIR":"$LOG_CONT_DIR" \
   -v "$DATA_DIR":"$DATA_CONT_DIR" \
   -v "$MODELS_DIR":"$MODELS_CONT_DIR" \
@@ -102,3 +100,4 @@ echo "✅ Up. Logs:  docker logs -f $APP_NAME"
 echo "🌐 Test:     curl http://127.0.0.1:$PORT/docs"
 echo "📁 Logs:     $LOG_DIR"
 echo "📁 Data:     $DATA_DIR"
+echo "⚙️  Change RAM limit: edit --memory/--shm-size in run_vision.sh"
