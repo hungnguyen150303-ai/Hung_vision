@@ -1,10 +1,9 @@
 # Jetson / L4T r36.4.0 (JetPack 6.1)
 FROM dustynv/l4t-pytorch:r36.4.0
 
-# ==== build args / env để tiết kiệm RAM ====
+# ==== build args / env để giảm RAM ====
 ARG MAKE_JOBS=1
-ARG USE_SRC_RS=0       # 0=apt librealsense, 1=build from source
-ARG USE_PUPIL=0       # 0=apt python3-apriltag, 1=pupil-apriltags (pip build)
+ARG WITH_FOLLOWME_EXTRAS=0   # 0 = không cài insightface khi build
 ENV MAKEFLAGS=-j${MAKE_JOBS} \
     CMAKE_BUILD_PARALLEL_LEVEL=${MAKE_JOBS} \
     DEBIAN_FRONTEND=noninteractive \
@@ -13,16 +12,12 @@ ENV MAKEFLAGS=-j${MAKE_JOBS} \
     QT_QPA_PLATFORM=offscreen \
     PIP_INDEX_URL=https://pypi.org/simple \
     PIP_DEFAULT_TIMEOUT=180 \
-    RS_VER=v2.56.5 \
     GLOG_minloglevel=2 \
     TF_CPP_MIN_LOG_LEVEL=2 \
-    # giảm RAM khi compile C/C++
-    CFLAGS="-O2 -pipe -fno-lto" \
-    CXXFLAGS="-O2 -pipe -fno-lto" \
-    LDFLAGS="-fno-lto" \
-    PIP_NO_BUILD_ISOLATION=1
+    # ép pip ưu tiên binary để né build từ source
+    PIP_PREFER_BINARY=1
 
-# 1) Gói hệ thống chung (OpenCV system, Eigen cho apriltag)
+# 1) Gói hệ thống — chỉ những gì cần thiết, ưu tiên APT (không compile)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential cmake git pkg-config \
     libssl-dev libusb-1.0-0-dev libudev-dev \
@@ -30,58 +25,44 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libeigen3-dev \
     udev v4l-utils ffmpeg curl ca-certificates \
     python3-opencv python3-pip \
+    python3-numpy python3-scipy python3-sklearn python3-sklearn-lib \
+    python3-sympy python3-networkx python3-matplotlib python3-imageio \
  && rm -rf /var/lib/apt/lists/*
 
-# 2) librealsense: ưu tiên APT (ít RAM). Có công tắc fallback build-from-source.
-#    Lưu ý: nếu Intel repo không có gói arm64 phù hợp board của bạn, đổi USE_SRC_RS=1 khi build.
+# 2) librealsense từ APT (né compile)
 RUN set -e; \
- if [ "x${USE_SRC_RS}" = "x0" ]; then \
-   echo ">>> Installing librealsense from Intel APT (no compile)"; \
-   apt-get update && apt-get install -y --no-install-recommends gnupg software-properties-common && \
-   curl -sS https://librealsense.intel.com/Debian/IntelRealSenseLFS.key | apt-key add - && \
-   add-apt-repository "deb https://librealsense.intel.com/Debian/apt-repo jammy main" && \
-   apt-get update && apt-get install -y --no-install-recommends \
-     librealsense2 librealsense2-utils librealsense2-gl \
-     python3-realsense2 \
-   && rm -rf /var/lib/apt/lists/* || echo "[WARN] Intel APT may not provide arm64 on this image"; \
- else \
-   echo ">>> Building librealsense from source (low-RAM flags)"; \
-   cd /tmp && git clone --depth=1 --branch ${RS_VER} https://github.com/IntelRealSense/librealsense.git && \
-   cd librealsense && mkdir build && cd build && \
-   cmake .. \
-     -DBUILD_EXAMPLES=OFF \
-     -DBUILD_GRAPHICAL_EXAMPLES=OFF \
-     -DBUILD_WITH_CUDA=OFF \ 
-     -DBUILD_PYTHON_BINDINGS=ON \
-     -DBUILD_TOOLS=OFF \
-     -DBUILD_UNIT_TESTS=OFF \
-     -DFORCE_RSUSB_BACKEND=ON \
-     -DPYTHON_EXECUTABLE=/usr/bin/python3 && \
-   make -j"${MAKE_JOBS}" && make install && ldconfig && \
-   cp ../config/99-realsense-libusb.rules /etc/udev/rules.d/ || true && \
-   udevadm control --reload-rules || true && \
-   cd /tmp && rm -rf librealsense; \
- fi
+    apt-get update && apt-get install -y --no-install-recommends gnupg software-properties-common && \
+    curl -sS https://librealsense.intel.com/Debian/IntelRealSenseLFS.key | apt-key add - && \
+    add-apt-repository "deb https://librealsense.intel.com/Debian/apt-repo jammy main" && \
+    apt-get update && apt-get install -y --no-install-recommends \
+      librealsense2 librealsense2-utils librealsense2-gl python3-realsense2 \
+    && rm -rf /var/lib/apt/lists/*
 
-# 3) AprilTag detector: ưu tiên apt (python3-apriltag). Công tắc fallback pupil-apriltags (pip build).
-RUN set -e; \
- if [ "x${USE_PUPIL}" = "x0" ]; then \
-   echo ">>> Installing python3-apriltag from APT"; \
-   apt-get update && apt-get install -y --no-install-recommends \
-     libapriltag3 python3-apriltag \
-   && rm -rf /var/lib/apt/lists/*; \
- else \
-   echo ">>> Installing pupil-apriltags (pip build; may use more RAM)"; \
-   python3 -m pip install --no-cache-dir pupil-apriltags==1.0.4; \
- fi
+# 3) AprilTag từ APT (né compile)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libapriltag3 python3-apriltag \
+ && rm -rf /var/lib/apt/lists/*
 
-# 4) App deps
 WORKDIR /app
 COPY requirements.txt /app/requirements.txt
+
+# 4) Python deps (nhẹ, né build from source)
 RUN python3 -m pip install --no-cache-dir --upgrade pip setuptools wheel \
  && python3 -m pip install --no-cache-dir -r /app/requirements.txt --no-deps \
  && python3 -m pip install --no-cache-dir "ultralytics>=8.2.0,<9" --no-deps \
  && python3 -m pip install --no-cache-dir fastapi "uvicorn[standard]" paho-mqtt
+
+# (TÙY CHỌN) Mediapipe — nếu bạn thực sự dùng trong unphysics. Có wheel aarch64 -> không compile.
+# Nếu chưa cần, có thể COMMENT 2 dòng dưới để càng nhẹ.
+RUN python3 -m pip install --no-cache-dir mediapipe>=0.10.0
+
+# KHÔNG cài insightface khi build (để sau bằng script trong container).
+# Nếu bạn thật sự muốn cài khi build (tốn RAM hơn), build với:
+#   --build-arg WITH_FOLLOWME_EXTRAS=1
+RUN if [ "x${WITH_FOLLOWME_EXTRAS}" = "x1" ]; then \
+      python3 -m pip install --no-cache-dir onnxruntime-gpu==1.16.3 || python3 -m pip install --no-cache-dir onnxruntime==1.16.3; \
+      python3 -m pip install --no-cache-dir insightface==0.7.3; \
+    fi
 
 # 5) Copy code & logs
 COPY . .
@@ -102,12 +83,12 @@ try:
     import apriltag
     print("[CHECK] apriltag: OK (APT)")
 except Exception as e:
-    print("[INFO] apriltag APT not present:", e)
+    print("[INFO] apriltag not present:", e)
 try:
-    import pupil_apriltags
-    print("[CHECK] pupil_apriltags: OK (pip)")
+    import mediapipe as mp
+    print("[CHECK] mediapipe: OK")
 except Exception as e:
-    print("[INFO] pupil_apriltags not present:", e)
+    print("[INFO] mediapipe not present:", e)
 PY
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "9000", "--log-level", "info"]

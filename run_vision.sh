@@ -29,18 +29,17 @@ print(port)
 PY
 )
 
-# ==== tuỳ chọn, kiểm soát song song & RAM khi build ====
-BUILD_JOBS="${BUILD_JOBS:-1}"         # 1 = ít RAM nhất
-BUILD_MEM="${BUILD_MEM:-4g}"          # giới hạn RAM 4GB
-BUILD_MEMSWAP="${BUILD_MEMSWAP:-4g}"  # tổng RAM+swap cho build (đặt =4g để cứng; hoặc 6g để cho phép spike nhẹ)
+# build args (siêu tiết kiệm RAM)
+BUILD_JOBS="${BUILD_JOBS:-1}"
+WITH_FOLLOWME_EXTRAS="${WITH_FOLLOWME_EXTRAS:-0}"  # 0 = không cài insightface khi build
 
-echo "📦 Building image $IMAGE_NAME (jobs=$BUILD_JOBS, mem=$BUILD_MEM, swap=$BUILD_MEMSWAP) ..."
-DOCKER_BUILDKIT=1 docker build \
+echo "📦 Building $IMAGE_NAME (jobs=$BUILD_JOBS, followme_extras=$WITH_FOLLOWME_EXTRAS) ..."
+# TẮT BuildKit để giảm RAM nền
+DOCKER_BUILDKIT=0 docker build \
   --build-arg MAKE_JOBS="$BUILD_JOBS" \
-  --memory="$BUILD_MEM" --memory-swap="$BUILD_MEMSWAP" \
+  --build-arg WITH_FOLLOWME_EXTRAS="$WITH_FOLLOWME_EXTRAS" \
   -t "$IMAGE_NAME" .
 
-# Tạo thư mục host nếu thiếu
 mkdir -p "$LOG_DIR" "$DATA_DIR" "$MODELS_DIR"
 
 echo "🛑 Stopping old container (if exists) ..."
@@ -65,5 +64,3 @@ docker run -d \
 
 echo "✅ Up. Logs:  docker logs -f $APP_NAME"
 echo "🌐 Test:     curl http://127.0.0.1:$PORT/healthz"
-echo "📁 Logs:     $LOG_DIR"
-echo "📁 Data:     $DATA_DIR"
