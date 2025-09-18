@@ -1,9 +1,11 @@
 # Jetson / L4T r36.4.0 (JetPack 6.1)
+ARG MAKE_JOBS=1
+ARG WITH_FOLLOWME_EXTRAS=0
+
 FROM dustynv/l4t-pytorch:r36.4.0
 
-# ==== build args / env để giảm RAM ====
-ARG MAKE_JOBS=1
-ARG WITH_FOLLOWME_EXTRAS=0   # 0 = không cài insightface khi build
+
+  
 
 # ép pip ưu tiên binary để né build từ source
 ENV MAKEFLAGS="-j${MAKE_JOBS}" \
